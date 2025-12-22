@@ -11,7 +11,7 @@ export class GeminiService {
     fuzzy: boolean;
     language: Language;
   }): Promise<{ results: PersonRecord[]; summary: SearchSummary }> {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
     
     const hasFirstName = !!params.firstName.trim();
     const hasSecondLastName = !!params.lastName2.trim();
