@@ -14,6 +14,7 @@ export interface PersonRecord {
   alternateNames?: string[];
   familyRelation?: string; // Vínculo familiar (ej: Padre, Hermano, Hijo)
   birthDate?: string;
+  deathDate?: string;
   birthPlace?: string;
   rank?: string;
   unit?: string;
@@ -28,7 +29,7 @@ export interface PersonRecord {
   repressionContext?: string;
   additionalNotes?: string;
   sources: Source[];
-  relevanceScore: number;
+  relevanceScore?: number;
 }
 
 export interface ArchiveRecommendation {

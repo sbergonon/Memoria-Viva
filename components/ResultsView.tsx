@@ -2,6 +2,7 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { PersonRecord, SearchSummary, Category, Language, Source } from '../types';
 import { translations } from '../i18n';
+import InfoSections from './InfoSections';
 import L from 'leaflet';
 import 'leaflet.markercluster';
 
@@ -15,6 +16,8 @@ interface ResultsViewProps {
   filterState: any;
   setFilterState: any;
   lang: Language;
+  selectedForReport: string[];
+  onToggleSelection: (id: string) => void;
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -43,55 +46,48 @@ const ValueDisplay: React.FC<{
   value?: string; 
   label?: string; 
   tooltip: string; 
-  light?: boolean;
-  action?: React.ReactNode;
-}> = ({ value, label, tooltip, light, action }) => {
+  important?: boolean;
+}> = ({ value, label, tooltip, important }) => {
   const displayValue = value && value.trim() !== '' && value !== '-' && value.toLowerCase() !== 'n/a' ? value : 'N/D';
   const isMissing = displayValue === 'N/D';
   
   return (
-    <div>
+    <div className={important ? 'bg-amber-50 p-2 rounded-lg border border-amber-100' : ''}>
       {label && (
-        <p className={`text-[9px] font-black uppercase tracking-tighter mb-1 ${light ? 'text-stone-400' : 'text-stone-500'}`}>
+        <p className="text-[9px] font-black uppercase tracking-tighter mb-1 text-stone-500">
           {label}
         </p>
       )}
-      <div className="flex items-center gap-2">
-        <p 
-          className={`font-bold text-sm flex items-center gap-1.5 ${isMissing ? (light ? 'text-stone-500 italic' : 'text-stone-500 italic') : (light ? 'text-stone-200' : 'text-stone-800')}`}
-          title={isMissing ? tooltip : undefined}
-        >
-          {displayValue}
-          {isMissing && <i className="fas fa-circle-info opacity-40 text-[10px]"></i>}
-        </p>
-        {!isMissing && action}
-      </div>
+      <p className={`font-bold text-sm flex items-center gap-1.5 ${isMissing ? 'text-stone-400 italic' : (important ? 'text-amber-900' : 'text-stone-800')}`}>
+        {important && !isMissing && <i className="fas fa-medal text-amber-500 text-[10px]"></i>}
+        {displayValue}
+      </p>
     </div>
   );
 };
 
-const ResultsView: React.FC<ResultsViewProps> = ({ results, summary, lang }) => {
+const ResultsView: React.FC<ResultsViewProps> = ({ results, summary, lang, query, selectedForReport, onToggleSelection }) => {
   const t = translations[lang].results;
   const commonT = translations[lang];
+  
   const [selectedSourceRecord, setSelectedSourceRecord] = useState<PersonRecord | null>(null);
   const [activeShareMenu, setActiveShareMenu] = useState<string | null>(null);
-  const [copiedStatus, setCopiedStatus] = useState<string | null>(null);
-  
-  const [locationQuery, setLocationQuery] = useState('');
-  const [rankQuery, setRankQuery] = useState('');
+  const [locationFilter, setLocationFilter] = useState('');
 
   const finalResults = useMemo(() => {
-    let filtered = results;
-    if (locationQuery.trim()) {
-      const lowerLoc = locationQuery.toLowerCase();
-      filtered = filtered.filter(r => (r.location?.toLowerCase().includes(lowerLoc)) || (r.birthPlace?.toLowerCase().includes(lowerLoc)));
-    }
-    if (rankQuery.trim()) {
-      const lowerRank = rankQuery.toLowerCase();
-      filtered = filtered.filter(r => r.rank?.toLowerCase().includes(lowerRank));
+    const searchLastName = query.lastName1.toLowerCase();
+    let filtered = results.filter(r => r.fullName.toLowerCase().includes(searchLastName));
+    
+    if (locationFilter.trim()) {
+      const lowerLoc = locationFilter.toLowerCase();
+      filtered = filtered.filter(r => 
+        (r.location?.toLowerCase().includes(lowerLoc)) || 
+        (r.birthPlace?.toLowerCase().includes(lowerLoc)) ||
+        (r.additionalNotes?.toLowerCase().includes(lowerLoc))
+      );
     }
     return filtered;
-  }, [results, locationQuery, rankQuery]);
+  }, [results, locationFilter, query]);
   
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -121,166 +117,162 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, summary, lang }) => 
     }
   }, [finalResults]);
 
-  const generateRecordText = (record: PersonRecord) => {
-    const d = "--------------------------------------------------";
-    return `INVESTIGACIÓN HISTÓRICA - MemoriaViva\n` +
-           `${d}\n` +
-           `NOMBRE: ${record.fullName}\n` +
-           `CATEGORÍA: ${record.category}\n` +
-           `ESTADO: ${record.status}\n` +
-           `LOCALIZACIÓN: ${record.location}\n` +
-           `${d}\n\n` +
-           `BIOGRAFÍA:\n${record.details}\n\n` +
-           (record.additionalNotes ? `NOTAS ADICIONALES (FOSAS/HONORES):\n${record.additionalNotes}\n\n` : '') +
-           `FUENTES:\n` +
-           record.sources.map(s => `  - ${s.title}: ${s.url}`).join('\n') +
-           `\n\nGenerado por MemoriaViva el ${new Date().toLocaleString()}`;
-  };
+  const handleIndividualShare = (record: PersonRecord, method: 'copy' | 'whatsapp' | 'email' | 'download') => {
+    const text = `Ficha Histórica: ${record.fullName}\nCategoría: ${record.category}\nUbicación: ${record.location}\nFecha: ${formatDate(record.deathDate || record.date)}\nDetalles: ${record.details}\nFuentes: ${record.sources.map(s => `${s.title} (${s.searchPath})`).join(', ')}`;
 
-  const handleDownloadRecordTxt = (record: PersonRecord) => {
-    const blob = new Blob([generateRecordText(record)], { type: 'text/plain;charset=utf-8' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `Ficha_${record.fullName.replace(/\s+/g, '_')}.txt`;
-    link.click();
+    if (method === 'copy') {
+      navigator.clipboard.writeText(text);
+    } else if (method === 'whatsapp') {
+      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+    } else if (method === 'email') {
+      window.location.href = `mailto:?subject=Ficha MemoriaViva: ${record.fullName}&body=${encodeURIComponent(text)}`;
+    } else if (method === 'download') {
+      const blob = new Blob([text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Ficha_${record.fullName.replace(/\s+/g, '_')}.txt`;
+      a.click();
+    }
     setActiveShareMenu(null);
   };
 
   return (
     <div className="space-y-12 mt-8">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-1 bg-stone-900 text-white p-8 rounded-2xl shadow-xl">
-          <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-amber-500 mb-6">{t.statsTitle}</h3>
-          <div className="space-y-4">
-            {Object.entries(summary.categoriesBreakdown || {}).map(([name, value]) => (
-              (value as number) > 0 && (
-                <div key={name} className="flex justify-between text-[11px] font-bold uppercase">
-                  <span className="text-stone-400">{name}</span><span>{value as React.ReactNode}</span>
-                </div>
-              )
-            ))}
-          </div>
-        </div>
-        <div className="lg:col-span-2 bg-white p-8 rounded-2xl border border-stone-200 shadow-sm">
-          <h3 className="text-[10px] font-black uppercase tracking-widest text-stone-400 mb-4">{t.analysisTitle}</h3>
-          <p className="historical-font text-xl text-stone-800 leading-relaxed italic">{summary.keyFindings}</p>
-          
-          {summary.groundingSources && summary.groundingSources.length > 0 && (
-            <div className="mt-6 pt-6 border-t border-stone-100">
-              <h4 className="text-[9px] font-black uppercase tracking-widest text-amber-600 mb-3">Fuentes Verificadas (Google Search)</h4>
-              <div className="flex flex-wrap gap-2">
-                {summary.groundingSources.map((source, idx) => (
-                  <a key={idx} href={source.url} target="_blank" rel="noopener noreferrer" className="text-[10px] px-3 py-1 bg-stone-100 hover:bg-stone-200 rounded-full text-stone-600 transition-colors">
-                    <i className="fas fa-link mr-1 opacity-50"></i>{source.title}
-                  </a>
-                ))}
-              </div>
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+        <div className="lg:col-span-3 bg-white p-8 rounded-3xl border-2 border-amber-200 shadow-sm">
+          <div className="flex items-center gap-4 mb-4">
+            <div className="w-10 h-10 bg-amber-600 rounded-lg flex items-center justify-center text-white">
+              <i className="fas fa-magnifying-glass-chart text-xl"></i>
             </div>
-          )}
-        </div>
-      </div>
-
-      <div className="space-y-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white p-6 rounded-2xl border shadow-sm">
-          <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <input 
-              type="text" 
-              value={locationQuery}
-              onChange={(e) => setLocationQuery(e.target.value)}
-              placeholder={t.locationFilterPlaceholder}
-              className="w-full px-4 py-3 rounded-xl border border-stone-200 outline-none focus:ring-2 focus:ring-amber-500 text-sm"
-            />
-            <input 
-              type="text" 
-              value={rankQuery}
-              onChange={(e) => setRankQuery(e.target.value)}
-              placeholder={t.rankFilterPlaceholder}
-              className="w-full px-4 py-3 rounded-xl border border-stone-200 outline-none focus:ring-2 focus:ring-amber-500 text-sm"
-            />
+            <h3 className="text-xs font-black uppercase tracking-widest text-amber-900">{t.analysisTitle}</h3>
           </div>
-          <div className="text-right">
-            <p className="text-[10px] font-black uppercase tracking-widest text-stone-400">Total Filtrado</p>
-            <p className="text-2xl font-bold historical-font">{finalResults.length} / {results.length}</p>
-          </div>
+          <p className="historical-font text-xl text-stone-800 leading-relaxed italic border-l-4 border-amber-500 pl-6">{summary.keyFindings}</p>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border shadow-sm">
-          <div ref={mapContainerRef} className="h-64 rounded-xl overflow-hidden border" />
+        <div className="bg-stone-900 p-8 rounded-3xl shadow-xl flex flex-col justify-center">
+          <label className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-500 mb-3 flex items-center gap-2">
+            <i className="fas fa-location-dot"></i> Filtrar Provincia
+          </label>
+          <input 
+            type="text" 
+            value={locationFilter}
+            onChange={(e) => setLocationFilter(e.target.value)}
+            placeholder="Teruel, Madrid..."
+            className="w-full bg-stone-800 border border-stone-700 text-white rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-amber-500 outline-none transition-all placeholder:text-stone-500"
+          />
         </div>
       </div>
 
       <div className="space-y-8">
-        <h3 className="text-3xl historical-font font-bold">{t.identifiedRecords} ({finalResults.length})</h3>
+        <h3 className="text-3xl historical-font font-bold flex items-center gap-4">
+          <i className="fas fa-folder-open text-stone-400"></i>
+          {t.identifiedRecords} ({finalResults.length})
+        </h3>
         
         {finalResults.length === 0 ? (
-          <div className="p-12 bg-white border-2 border-dashed border-stone-200 rounded-3xl text-center">
-            <p className="text-stone-500 historical-font text-xl italic">{commonT.noResultsFound}</p>
+          <div className="p-20 bg-stone-50 border-2 border-dashed border-stone-200 rounded-3xl text-center">
+            <i className="fas fa-database text-4xl text-stone-300 mb-6"></i>
+            <p className="text-stone-500 historical-font text-xl italic max-w-lg mx-auto">{commonT.noResultsFound}</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            {finalResults.map((record) => (
-              <div key={record.id} className="bg-white border-2 p-8 rounded-3xl shadow-sm flex flex-col hover:border-amber-500 transition-all border-stone-100">
-                <div className="flex justify-between items-start mb-6">
-                  <div className="relative">
-                    <button onClick={() => setActiveShareMenu(activeShareMenu === record.id ? null : record.id)} className="px-4 py-2 bg-stone-100 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-amber-100">
-                      <i className="fas fa-share-nodes mr-2"></i>{t.share}
+            {finalResults.map((record) => {
+              const isCombatant = record.category.toLowerCase().includes('combate') || record.category.toLowerCase().includes('condecorado') || !!record.rank;
+              const isSelected = selectedForReport.includes(record.id);
+              
+              return (
+                <div key={record.id} className={`bg-white border-2 p-8 rounded-3xl shadow-md flex flex-col hover:shadow-xl transition-all relative ${isCombatant ? 'border-amber-200' : 'border-stone-100'}`}>
+                  <div className="absolute top-6 right-6 z-10">
+                    <button 
+                      onClick={() => onToggleSelection(record.id)}
+                      className={`w-8 h-8 rounded-full flex items-center justify-center transition-all border-2 ${isSelected ? 'bg-amber-600 border-amber-600 text-white' : 'bg-white border-stone-200 text-stone-200 hover:border-amber-400'}`}
+                    >
+                      <i className={`fas ${isSelected ? 'fa-check' : 'fa-plus'} text-xs`}></i>
                     </button>
-                    {activeShareMenu === record.id && (
-                      <div className="absolute top-full left-0 mt-2 w-56 bg-white border rounded-xl shadow-2xl z-[100] p-2">
-                         <button onClick={() => { navigator.clipboard.writeText(generateRecordText(record)); setCopiedStatus(record.id); setTimeout(() => setCopiedStatus(null), 2000); setActiveShareMenu(null); }} className="w-full text-left px-3 py-3 text-[10px] font-bold uppercase hover:bg-stone-50 rounded flex items-center gap-3">
-                           <i className="fas fa-copy text-amber-600"></i> {copiedStatus === record.id ? t.copied : t.shareOptions.copyText}
-                         </button>
-                         <button onClick={() => handleDownloadRecordTxt(record)} className="w-full text-left px-3 py-3 text-[10px] font-bold uppercase hover:bg-stone-50 rounded flex items-center gap-3">
-                           <i className="fas fa-file-arrow-down text-stone-600"></i> {t.shareOptions.download}
-                         </button>
-                      </div>
-                    )}
                   </div>
-                  <span className="text-[9px] px-3 py-1.5 rounded-full text-white font-black uppercase tracking-widest" style={{ backgroundColor: getCategoryColor(record.category) }}>
-                    {record.category}
-                  </span>
-                </div>
 
-                <h4 className="historical-font text-3xl font-bold uppercase leading-tight mb-4">{record.fullName}</h4>
+                  <div className="flex justify-between items-start mb-6">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[7px] font-black bg-stone-900 text-white px-2 py-1 rounded shadow-sm">
+                        <i className="fas fa-certificate text-amber-400 mr-1"></i> VERIFICADO
+                      </span>
+                      <span className="text-[9px] px-3 py-1.5 rounded-full text-white font-black uppercase tracking-widest" style={{ backgroundColor: getCategoryColor(record.category) }}>
+                        {record.category}
+                      </span>
+                    </div>
+                  </div>
 
-                <div className="bg-stone-50 p-6 rounded-2xl mb-6 text-sm text-stone-600 flex-grow">
-                   <div className="grid grid-cols-2 gap-4 mb-4 pb-4 border-b">
-                     <ValueDisplay label={t.location} value={record.location} tooltip={t.dataNotAvailable} />
-                     <ValueDisplay label={t.date} value={formatDate(record.date)} tooltip={t.dataNotAvailable} />
-                   </div>
-                   <p className="historical-font italic leading-relaxed text-stone-800 text-justify mb-4">{record.details}</p>
-                   
-                   {/* Nueva sección para notas adicionales (donde irán los datos de fosas/entierro) */}
-                   {record.additionalNotes && (
-                     <div className="mt-4 pt-4 border-t border-stone-200">
-                        <p className="text-[9px] font-black uppercase tracking-tighter text-amber-700 mb-1">Información de Memoria (Fosas/Entierro/Honores)</p>
-                        <p className="text-xs italic text-stone-700">{record.additionalNotes}</p>
+                  <h4 className="historical-font text-3xl font-bold uppercase mb-4 pr-10">{record.fullName}</h4>
+
+                  <div className="bg-stone-50 p-6 rounded-2xl mb-6 text-sm text-stone-600 flex-grow border border-stone-100">
+                     <div className="grid grid-cols-2 gap-4 mb-4 pb-4 border-b border-stone-200">
+                       <ValueDisplay label="Rango" value={record.rank} tooltip={t.dataNotAvailable} important={!!record.rank} />
+                       <ValueDisplay label="Cuerpo" value={record.unit} tooltip={t.dataNotAvailable} />
                      </div>
-                   )}
-                </div>
+                     <ValueDisplay label="Hechos" value={formatDate(record.deathDate || record.date)} tooltip={t.dataNotAvailable} />
+                     <p className="mt-4 historical-font italic text-stone-800 text-base leading-relaxed">{record.details}</p>
+                  </div>
 
-                <button onClick={() => setSelectedSourceRecord(record)} className="w-full py-4 bg-stone-900 text-white rounded-xl text-[10px] font-black uppercase tracking-[0.2em] shadow-lg hover:bg-black transition-all">
-                  <i className="fas fa-folder-tree text-amber-500 mr-2"></i>{t.exploreSources}
-                </button>
-              </div>
-            ))}
+                  <div className="flex gap-2">
+                    <button onClick={() => setSelectedSourceRecord(record)} className="flex-1 py-4 bg-stone-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-black transition-all">
+                      <i className="fas fa-scroll text-amber-500 mr-2"></i>{t.exploreSources}
+                    </button>
+                    <div className="relative">
+                      <button onClick={() => setActiveShareMenu(activeShareMenu === record.id ? null : record.id)} className="p-4 bg-amber-100 text-amber-900 rounded-xl hover:bg-amber-200 transition-all border border-amber-200">
+                        <i className="fas fa-share-nodes"></i>
+                      </button>
+                      {activeShareMenu === record.id && (
+                        <div className="absolute bottom-full right-0 mb-2 w-48 bg-white border border-stone-200 rounded-xl shadow-2xl z-50 p-1">
+                          <button onClick={() => handleIndividualShare(record, 'copy')} className="w-full text-left px-3 py-2 text-[9px] font-bold uppercase hover:bg-stone-50 rounded-lg flex items-center gap-2">
+                            <i className="fas fa-copy text-amber-600"></i> {t.shareOptions.copyText}
+                          </button>
+                          <button onClick={() => handleIndividualShare(record, 'whatsapp')} className="w-full text-left px-3 py-2 text-[9px] font-bold uppercase hover:bg-stone-50 rounded-lg flex items-center gap-2">
+                            <i className="fab fa-whatsapp text-green-600"></i> {t.shareOptions.whatsapp}
+                          </button>
+                          <button onClick={() => handleIndividualShare(record, 'email')} className="w-full text-left px-3 py-2 text-[9px] font-bold uppercase hover:bg-stone-50 rounded-lg flex items-center gap-2">
+                            <i className="fas fa-envelope text-blue-600"></i> {t.shareOptions.email}
+                          </button>
+                          <button onClick={() => handleIndividualShare(record, 'download')} className="w-full text-left px-3 py-2 text-[9px] font-bold uppercase hover:bg-stone-50 rounded-lg flex items-center gap-2">
+                            <i className="fas fa-download text-stone-600"></i> {t.shareOptions.download}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
 
+      <InfoSections lang={lang} />
+
       {selectedSourceRecord && (
-        <div className="fixed inset-0 bg-stone-900/90 z-[150] flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setSelectedSourceRecord(null)}>
-          <div className="bg-white max-w-lg w-full rounded-2xl p-8 max-h-[80vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="historical-font text-2xl font-bold">Fuentes Documentales</h2>
-              <button onClick={() => setSelectedSourceRecord(null)} className="text-stone-400 hover:text-stone-900"><i className="fas fa-times text-xl"></i></button>
+        <div className="fixed inset-0 bg-stone-900/95 z-[150] flex items-center justify-center p-4 backdrop-blur-md" onClick={() => setSelectedSourceRecord(null)}>
+          <div className="bg-white max-w-xl w-full rounded-3xl p-10 max-h-[85vh] overflow-y-auto shadow-2xl relative" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-8">
+              <div className="flex items-center gap-4">
+                <i className="fas fa-book-open text-3xl text-amber-700"></i>
+                <h2 className="historical-font text-3xl font-bold uppercase">Fuentes Oficiales</h2>
+              </div>
+              <button onClick={() => setSelectedSourceRecord(null)} className="w-10 h-10 bg-stone-100 rounded-full flex items-center justify-center hover:bg-stone-200 transition-colors">
+                <i className="fas fa-times text-xl text-stone-400"></i>
+              </button>
             </div>
             <div className="space-y-6">
               {selectedSourceRecord.sources.map((s, i) => (
-                <div key={i} className="p-4 bg-stone-50 rounded-xl border border-stone-200">
-                  <p className="font-bold text-lg mb-2">{s.title}</p>
-                  <p className="text-[10px] font-mono mb-3 p-1 bg-amber-100 inline-block rounded">SIGNATURA: {s.searchPath || 'N/A'}</p>
-                  <a href={s.url} target="_blank" rel="noopener noreferrer" className="block text-center py-2 bg-stone-800 text-white text-[10px] font-black uppercase rounded hover:bg-black">Ir al Archivo</a>
+                <div key={i} className="p-6 rounded-2xl border-2 bg-stone-50 border-stone-100">
+                  <p className="font-bold text-xl text-stone-900 mb-2">{s.title}</p>
+                  <p className="text-[10px] font-mono p-1.5 bg-stone-900 text-amber-400 rounded uppercase font-bold mb-4 inline-block">
+                    <i className="fas fa-barcode mr-2"></i>SIGNATURA: {s.searchPath || 'Consultar en Archivo'}
+                  </p>
+                  {s.url.startsWith('http') && (
+                    <a href={s.url} target="_blank" rel="noopener noreferrer" className="block w-full text-center py-3 bg-stone-900 text-white text-[10px] font-black uppercase rounded-xl hover:bg-black flex items-center justify-center gap-2">
+                      <i className="fas fa-external-link-alt"></i> Fondo Digital
+                    </a>
+                  )}
                 </div>
               ))}
             </div>
