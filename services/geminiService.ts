@@ -11,21 +11,20 @@ export class GeminiService {
     fuzzy: boolean;
     language: Language;
   }): Promise<{ results: PersonRecord[]; summary: SearchSummary }> {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    // Se inicializa la instancia justo antes de la llamada para asegurar que usa la clave más reciente.
+    const apiKey = process.env.API_KEY;
+    const ai = new GoogleGenAI({ apiKey: apiKey || '' });
     
     const targetName = `${params.firstName || ''} ${params.lastName1} ${params.lastName2 || ''}`.trim();
 
     const userPrompt = `
-      SOLICITUD DE INVESTIGACIÓN ÚNICA E INDEPENDIENTE:
-      - SUJETO ACTUAL: "${targetName}"
-      - APELLIDO 1: "${params.lastName1}"
-      - APELLIDO 2: "${params.lastName2 || 'No proporcionado'}"
-
-      PROTOCOLO DE AISLAMIENTO DOCUMENTAL:
-      1. PROHIBICIÓN DE MEMORIA TRANSVERSAL: No utilices información de personas buscadas en consultas anteriores (como casos de ejecuciones en el Camp de la Bóta o exilios). Cada búsqueda es un compartimento estanco.
-      2. VERIFICACIÓN DE IDENTIDAD: Si localizas registros de "Pedro Bergoñón", cíñete estrictamente a lo que diga el documento oficial. Si el documento NO menciona una ejecución o represalia específica para ESTA persona exacta, no la inventes ni la heredes de otros perfiles.
-      3. RIGOR EN APELLIDOS: Si el usuario no proporciona un segundo apellido, el resultado no debe tenerlo a menos que la fuente oficial lo identifique sin género de duda. Prohibido añadir "Giménez", "Alfonso" o similares por suposición.
-      4. CATEGORIZACIÓN BASADA EN EVIDENCIA: Si Marceliano Bergoñón consta como soldado, categorízalo como tal. No asumas ideología política o exilio si el registro no lo explicita.
+      INVESTIGACIÓN HISTÓRICA AISLADA - CASO: "${targetName}"
+      
+      INSTRUCCIONES DE VERIFICACIÓN (CRÍTICO):
+      1. AMNESIA DOCUMENTAL: Ignora cualquier dato sobre "Pedro Bergoñón", "Camp de la Bóta" o ejecuciones mencionado en conversaciones o ejemplos previos. Solo puedes usar información que encuentres mediante Google Search en esta llamada específica.
+      2. PRECISIÓN DE APELLIDOS: Si no encuentras el segundo apellido exacto del sujeto, NO lo inventes. No añadas "Giménez" o similares por proximidad estadística.
+      3. Marceliano Bergoñón: Verifica si es soldado. No asumas exilio ni bando antifascista si el registro militar oficial no lo indica expresamente.
+      4. FUENTES OBLIGATORIAS: Consulta el Portal de Archivos de Defensa y el Memorial Democràtic.
     `;
 
     try {
@@ -34,11 +33,11 @@ export class GeminiService {
         contents: userPrompt,
         config: {
           temperature: 0, 
-          systemInstruction: `Eres un Archivero del Estado con formación en método histórico crítico.
-          - TU MISIÓN: Localizar la verdad documental en PARES, Portal de Archivos de Defensa y Banc de la Memòria Democràtica.
-          - TU REGLA SAGRADA: "Mejor omitir que mentir". Si un dato (segundo apellido, causa de muerte, bando) no está en la fuente, informa de su ausencia.
-          - PROHIBICIÓN: No mezcles biografías de personas con el mismo apellido. 
-          - ESTRUCTURA: Devuelve un JSON con los resultados encontrados EXCLUSIVAMENTE mediante la herramienta de búsqueda para esta consulta específica.`,
+          systemInstruction: `Eres un Archivero Mayor del Estado. Tu rigor es judicial.
+          - No mezclas personas. Si dos personas se llaman "Pedro Bergoñón", sepáralas por fecha de nacimiento o unidad.
+          - Si un dato no es 100% veraz, indica "Dato no localizado".
+          - Prohibido alucinar biografías basadas en búsquedas anteriores del usuario.
+          - Devuelve un JSON estricto con los hallazgos.`,
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -56,7 +55,7 @@ export class GeminiService {
                     date: { type: Type.STRING },
                     birthDate: { type: Type.STRING },
                     deathDate: { type: Type.STRING },
-                    details: { type: Type.STRING, description: "Hechos probados en el archivo. Sin suposiciones." },
+                    details: { type: Type.STRING },
                     rank: { type: Type.STRING },
                     unit: { type: Type.STRING },
                     additionalNotes: { type: Type.STRING },
@@ -69,7 +68,7 @@ export class GeminiService {
                         properties: {
                           title: { type: Type.STRING },
                           url: { type: Type.STRING },
-                          searchPath: { type: Type.STRING, description: "Signatura/Caja de archivo." }
+                          searchPath: { type: Type.STRING }
                         },
                         required: ["title", "url"]
                       }
@@ -97,7 +96,6 @@ export class GeminiService {
       const text = response.text || "{}";
       const data = JSON.parse(text);
 
-      // Filtro final para asegurar que el apellido principal coincida
       const filteredResults = (data.results || []).filter((r: PersonRecord) => {
         return r.fullName.toLowerCase().includes(params.lastName1.toLowerCase());
       });
@@ -106,7 +104,7 @@ export class GeminiService {
         totalResults: filteredResults.length,
         sourcesConsulted: 0,
         categoriesBreakdown: {} as any,
-        keyFindings: data.summary?.keyFindings || "Investigación realizada bajo protocolo de aislamiento documental.",
+        keyFindings: data.summary?.keyFindings || "Investigación completada bajo protocolo de rigor documental.",
         historicalContext: "",
         archiveRecommendations: [],
       };
@@ -114,7 +112,10 @@ export class GeminiService {
       return { results: filteredResults, summary };
     } catch (error: any) {
       console.error("Gemini Search Error:", error);
-      throw new Error("El sistema de archivos está saturado. Por favor, espere 10 segundos antes de reintentar la consulta.");
+      if (error.message?.includes("Requested entity was not found")) {
+        throw new Error("ERROR_KEY_NOT_FOUND");
+      }
+      throw new Error("Error en la conexión con los archivos estatales. Por favor, reintente en unos segundos.");
     }
   }
 }

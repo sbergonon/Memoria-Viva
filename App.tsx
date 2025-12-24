@@ -32,11 +32,30 @@ const App: React.FC = () => {
   const [showAboutPage, setShowAboutPage] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
+  const [hasKey, setHasKey] = useState(true);
   
   const [selectedCategories, setSelectedCategories] = useState<Category[]>([]);
   const [selectedForReport, setSelectedForReport] = useState<string[]>([]);
 
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Verificación inicial de API Key para entornos tipo Render/Studio
+  useEffect(() => {
+    const checkKey = async () => {
+      if (window.aistudio && typeof window.aistudio.hasSelectedApiKey === 'function') {
+        const selected = await window.aistudio.hasSelectedApiKey();
+        setHasKey(selected);
+      }
+    };
+    checkKey();
+  }, []);
+
+  const handleOpenKeySelector = async () => {
+    if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
+      await window.aistudio.openSelectKey();
+      setHasKey(true); // Asumimos éxito tras el diálogo
+    }
+  };
 
   useEffect(() => {
     let interval: number;
@@ -45,7 +64,7 @@ const App: React.FC = () => {
       setLoadingTime(0);
       interval = window.setInterval(() => {
         setLoadingMessageIndex(prev => (prev + 1) % t.loadingMessages.length);
-      }, 3500);
+      }, 4000);
       timer = window.setInterval(() => {
         setLoadingTime(prev => prev + 1);
       }, 1000);
@@ -86,7 +105,12 @@ const App: React.FC = () => {
       if (results) setSelectedForReport(results.map(r => r.id));
     } catch (err: any) {
       if (err.name === 'AbortError') return;
-      setState(prev => ({ ...prev, loading: false, error: err.message }));
+      if (err.message === 'ERROR_KEY_NOT_FOUND') {
+        setHasKey(false);
+        setState(prev => ({ ...prev, loading: false, error: "Es necesario configurar la clave de acceso para investigar en los archivos." }));
+      } else {
+        setState(prev => ({ ...prev, loading: false, error: err.message }));
+      }
     } finally {
       abortControllerRef.current = null;
     }
@@ -126,6 +150,11 @@ const App: React.FC = () => {
                 <i className="fas fa-question-circle text-amber-500"></i>{t.helpButton}
               </button>
             </div>
+            {!hasKey && (
+              <button onClick={handleOpenKeySelector} className="bg-red-900/50 border border-red-500 text-red-100 px-4 py-2 rounded-lg text-[10px] font-black uppercase animate-pulse">
+                <i className="fas fa-key mr-2"></i>Configurar Acceso
+              </button>
+            )}
             <div className="bg-stone-800 rounded-lg p-1 flex gap-1">
               <button onClick={() => setLang('es')} className={`px-3 py-1 text-[10px] font-bold rounded ${lang === 'es' ? 'bg-amber-600 text-white' : 'text-stone-400'}`}>ES</button>
               <button onClick={() => setLang('en')} className={`px-3 py-1 text-[10px] font-bold rounded ${lang === 'en' ? 'bg-amber-600 text-white' : 'text-stone-400'}`}>EN</button>
@@ -191,7 +220,7 @@ const App: React.FC = () => {
              <div className="w-16 h-16 border-4 border-amber-600 border-t-transparent rounded-full animate-spin mb-8"></div>
              <p className="text-stone-800 font-black uppercase tracking-widest text-sm mb-1">{t.loadingMessages[loadingMessageIndex]}</p>
              <p className="text-amber-700 font-bold text-lg mb-4">{loadingTime}s</p>
-             <p className="text-[10px] text-stone-400 uppercase font-bold tracking-tighter mb-8 italic">Investigación en profundidad: este proceso puede demorar hasta 2 minutos.</p>
+             <p className="text-[10px] text-stone-400 uppercase font-bold tracking-tighter mb-8 italic">Cotejando registros militares y civiles... Por favor, no cierre la ventana.</p>
              <button onClick={() => setState(prev => ({ ...prev, loading: false }))} className="px-6 py-3 bg-stone-50 hover:bg-red-50 text-stone-400 hover:text-red-700 rounded-xl text-[10px] font-black uppercase border border-stone-200 transition-colors">
                {t.stopSearch}
              </button>
@@ -199,8 +228,16 @@ const App: React.FC = () => {
         )}
 
         {state.error && !state.loading && (
-          <div className="mt-8 p-6 bg-red-50 border border-red-100 text-red-800 rounded-2xl flex items-center gap-4">
-             <i className="fas fa-circle-exclamation text-2xl"></i><p className="font-bold">{state.error}</p>
+          <div className="mt-8 p-6 bg-red-50 border border-red-100 text-red-800 rounded-2xl flex flex-col md:flex-row items-center gap-4">
+             <i className="fas fa-circle-exclamation text-2xl"></i>
+             <div className="flex-grow">
+               <p className="font-bold">{state.error}</p>
+             </div>
+             {!hasKey && (
+               <button onClick={handleOpenKeySelector} className="px-6 py-3 bg-red-800 text-white rounded-xl text-[10px] font-black uppercase">
+                 Seleccionar Clave
+               </button>
+             )}
           </div>
         )}
 
